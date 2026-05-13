@@ -14,6 +14,7 @@ from simulation import IndustrialSimulation
 
 
 SCAN_MS = 75
+AUTO_DRIVEN_INPUTS = {"SENSOR1", "SENSOR2", "BOX_TYPE"}
 MONITORED_TIMERS = ("T1", "T2")
 WATCH_SIGNALS = (
     "INSPECT_DONE",
@@ -60,17 +61,17 @@ ALARM = ESTOP OR (SENSOR2 AND NOT GATE)
 """,
     },
     "Sorting Diverter": {
-        "description": "Uses SENSOR2 as a quality/photo-eye station and diverts after a short confirmation delay.",
+        "description": "Classifies boxes at SENSOR2 and diverts reject boxes (BOX_TYPE ON) down the reject chute.",
         "program": """# Sorting Diverter
-# SENSOR2 confirms the box reached the sorting station.
-# The motor pauses at SENSOR2 until the sorting timer is done.
-T2 = TIMER(SENSOR2, 1.2)
+# Each new box has a BOX_TYPE bit. ON = reject, OFF = accept.
+# At SENSOR2 the PLC dwells, then fires DIVERTER for reject boxes.
+T2 = TIMER(SENSOR2, 0.6)
 TIMER2_DONE = T2_DONE
 SORT_DONE = T2_DONE OR (SORT_DONE AND SENSOR2)
+DIVERTER = SORT_DONE AND BOX_TYPE AND NOT ESTOP
+GATE = SORT_DONE AND NOT ESTOP
 MOTOR = START AND NOT STOP AND NOT ESTOP AND NOT (SENSOR2 AND NOT SORT_DONE)
-DIVERTER = SORT_DONE AND NOT ESTOP
-GATE = SENSOR2 OR DIVERTER
-READY = MOTOR AND NOT DIVERTER AND NOT ALARM
+READY = MOTOR AND NOT ALARM
 ALARM = ESTOP
 """,
     },
@@ -157,6 +158,7 @@ STOP: normal stop command, usually used as NOT STOP.
 ESTOP: emergency stop/fault input. Use it to force MOTOR/GATE off and ALARM on.
 SENSOR1: entry/inspection photo-eye near the clamp station.
 SENSOR2: exit/sorting photo-eye near the gate and diverter.
+BOX_TYPE: classifier for the current box. OFF = accept (amber), ON = reject (blue). In AUTO mode it alternates as each new box appears.
 
 Outputs:
 MOTOR moves the conveyor box.
@@ -251,8 +253,10 @@ class PlcSimulatorApp:
 
     def _build_left_panel(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(1, weight=1)
-        ttk.Label(parent, text="Inputs", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
-        for row, name in enumerate(DEFAULT_INPUTS, start=1):
+        row = 0
+        ttk.Label(parent, text="Inputs", style="Title.TLabel").grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        row += 1
+        for name in DEFAULT_INPUTS:
             lamp = tk.Canvas(parent, width=24, height=24, bg="#ffffff", highlightthickness=0)
             lamp.grid(row=row, column=0, padx=(0, 6), pady=4)
             lamp.create_oval(4, 4, 20, 20, fill="#9ca3af", outline="#6b7280", width=2, tags=("bulb",))
@@ -260,25 +264,26 @@ class PlcSimulatorApp:
             button.grid(row=row, column=1, sticky="ew", pady=4)
             self.input_lamps[name] = lamp
             self.input_buttons[name] = button
+            row += 1
 
-        ttk.Separator(parent).grid(row=7, column=0, columnspan=2, sticky="ew", pady=14)
+        ttk.Separator(parent).grid(row=row, column=0, columnspan=2, sticky="ew", pady=14); row += 1
         self.mode_var = tk.StringVar(value="AUTO")
-        ttk.Label(parent, text="Mode", style="Title.TLabel").grid(row=8, column=0, columnspan=2, sticky="w")
-        ttk.Radiobutton(parent, text="Auto", variable=self.mode_var, value="AUTO", command=self._mode_changed).grid(row=9, column=0, columnspan=2, sticky="w")
-        ttk.Radiobutton(parent, text="Manual", variable=self.mode_var, value="MANUAL", command=self._mode_changed).grid(row=10, column=0, columnspan=2, sticky="w")
+        ttk.Label(parent, text="Mode", style="Title.TLabel").grid(row=row, column=0, columnspan=2, sticky="w"); row += 1
+        ttk.Radiobutton(parent, text="Auto", variable=self.mode_var, value="AUTO", command=self._mode_changed).grid(row=row, column=0, columnspan=2, sticky="w"); row += 1
+        ttk.Radiobutton(parent, text="Manual", variable=self.mode_var, value="MANUAL", command=self._mode_changed).grid(row=row, column=0, columnspan=2, sticky="w"); row += 1
 
-        ttk.Separator(parent).grid(row=11, column=0, columnspan=2, sticky="ew", pady=14)
-        ttk.Button(parent, text="Single Step", command=self._single_step).grid(row=12, column=0, columnspan=2, sticky="ew", pady=4)
-        ttk.Button(parent, text="Pause / Resume", command=self._toggle_pause).grid(row=13, column=0, columnspan=2, sticky="ew", pady=4)
-        ttk.Button(parent, text="Reset Box", command=self._reset_box).grid(row=14, column=0, columnspan=2, sticky="ew", pady=4)
+        ttk.Separator(parent).grid(row=row, column=0, columnspan=2, sticky="ew", pady=14); row += 1
+        ttk.Button(parent, text="Single Step", command=self._single_step).grid(row=row, column=0, columnspan=2, sticky="ew", pady=4); row += 1
+        ttk.Button(parent, text="Pause / Resume", command=self._toggle_pause).grid(row=row, column=0, columnspan=2, sticky="ew", pady=4); row += 1
+        ttk.Button(parent, text="Reset Box", command=self._reset_box).grid(row=row, column=0, columnspan=2, sticky="ew", pady=4); row += 1
 
-        ttk.Separator(parent).grid(row=15, column=0, columnspan=2, sticky="ew", pady=14)
+        ttk.Separator(parent).grid(row=row, column=0, columnspan=2, sticky="ew", pady=14); row += 1
         ttk.Checkbutton(
             parent,
             text="Force outputs",
             variable=self.force_mode_var,
             command=self._force_mode_changed,
-        ).grid(row=16, column=0, columnspan=2, sticky="w")
+        ).grid(row=row, column=0, columnspan=2, sticky="w")
 
     def _build_center_panel(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Logic Editor", style="Title.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
@@ -311,7 +316,8 @@ class PlcSimulatorApp:
         for col in range(7):
             controls.columnconfigure(col, weight=1)
 
-        ttk.Button(controls, text="RUN", style="Run.TButton", command=self._run).grid(row=0, column=0, sticky="ew", padx=3)
+        self.run_button = ttk.Button(controls, text="RUN", style="Run.TButton", command=self._run)
+        self.run_button.grid(row=0, column=0, sticky="ew", padx=3)
         ttk.Button(controls, text="STOP", command=self._stop).grid(row=0, column=1, sticky="ew", padx=3)
         ttk.Button(controls, text="CLEAR LOGIC", command=self._clear_logic).grid(row=0, column=2, sticky="ew", padx=3)
         example_box = ttk.Combobox(controls, textvariable=self.example_var, values=list(EXAMPLES), state="readonly", width=18)
@@ -512,8 +518,8 @@ class PlcSimulatorApp:
         self._log("Simulation paused" if self.paused else "Simulation resumed")
 
     def _toggle_input(self, name: str) -> None:
-        if self.mode_var.get() == "AUTO" and name in {"SENSOR1", "SENSOR2"}:
-            self._log(f"{name} is controlled by box position in AUTO mode")
+        if self.mode_var.get() == "AUTO" and name in AUTO_DRIVEN_INPUTS:
+            self._log(f"{name} is controlled by the simulator in AUTO mode")
             return
         self.signals.set(name, not self.signals.get(name))
         self._refresh_inputs()
@@ -522,7 +528,7 @@ class PlcSimulatorApp:
     def _refresh_inputs(self) -> None:
         for name, button in self.input_buttons.items():
             value = self.signals.get(name)
-            suffix = f"AUTO {'ON' if value else 'OFF'}" if self.mode_var.get() == "AUTO" and name in {"SENSOR1", "SENSOR2"} else ("ON" if value else "OFF")
+            suffix = f"AUTO {'ON' if value else 'OFF'}" if self.mode_var.get() == "AUTO" and name in AUTO_DRIVEN_INPUTS else ("ON" if value else "OFF")
             style = "Fault.TButton" if name == "ESTOP" and value else "On.TButton" if value else "Off.TButton"
             button.configure(text=f"{name}: {suffix}", style=style)
             fill, outline = ("#ef4444", "#991b1b") if name == "ESTOP" and value else (("#22c55e", "#15803d") if value else ("#9ca3af", "#6b7280"))
@@ -684,14 +690,29 @@ class PlcSimulatorApp:
     def _mode_changed(self) -> None:
         if self.mode_var.get() == "AUTO":
             self._apply_auto_sensors()
+            self.run_button.configure(state="normal")
+        else:
+            self.run_button.configure(state="disabled")
         self._refresh_inputs()
         self._refresh_scan_monitor()
         self._log(f"Mode changed to {self.mode_var.get()}")
 
     def _reset_box(self) -> None:
+        self.running = False
+        self.paused = False
+        self.engine.reset()
+        self.signals.reset_runtime()
+        self.signals.update_many(self.engine.reset_program_signals())
+        self._apply_forced_outputs()
         self.simulation.reset_box()
         self._apply_auto_sensors()
         self.simulation.update(self.signals.snapshot(), 0.0)
+        self._refresh_inputs()
+        self._refresh_outputs()
+        self._refresh_timers()
+        self._refresh_watch_table()
+        self.status_label.configure(text="Stopped")
+        self._refresh_scan_monitor()
         self._log("Box reset to start position")
 
     def _highlight_error(self, line_no: int | None) -> None:

@@ -9,17 +9,38 @@ from typing import Dict
 class IndustrialSimulation:
     """Simple conveyor, box, gate, sensors, and alarm lamp animation."""
 
+    ACCEPT_COLORS = {
+        "top": "#f0b65f",
+        "side": "#ad7130",
+        "front": "#d79b45",
+        "seam": "#b47a32",
+        "outline": "#8a5a22",
+    }
+    REJECT_COLORS = {
+        "top": "#7aa7d9",
+        "side": "#3a78b3",
+        "front": "#5b9bd5",
+        "seam": "#2c5a8c",
+        "outline": "#1f4e79",
+    }
+
     def __init__(self, parent: tk.Widget) -> None:
         self.canvas = tk.Canvas(parent, width=560, height=280, bg="#f4f6f8", highlightthickness=0)
         self.box_x = 78.0
+        self.box_y_offset = 0.0
+        self.box_type = False  # False = accept (amber), True = reject (blue)
+        self.divert_armed = False
         self.alarm_flash = False
         self._build_scene()
+        self._apply_box_color()
 
     def grid(self, **kwargs) -> None:
         self.canvas.grid(**kwargs)
 
     def reset_box(self) -> None:
         self.box_x = 78.0
+        self.box_y_offset = 0.0
+        self.divert_armed = False
         self._set_box_coords()
 
     def _build_scene(self) -> None:
@@ -36,6 +57,14 @@ class IndustrialSimulation:
             c.create_line(72 + i * 70, 195, 106 + i * 70, 195, fill="#cfd6df", width=3)
             for i in range(6)
         ]
+
+        c.create_polygon(
+            432, 202, 504, 202,
+            534, 274, 462, 274,
+            fill="#cbd5e1", outline="#475569", width=2,
+        )
+        c.create_text(498, 266, text="REJECT", font=("Segoe UI", 8, "bold"), fill="#7f1d1d")
+
         self.box_shadow = c.create_oval(76, 146, 142, 166, fill="#000000", outline="", stipple="gray50")
         self.box_top = c.create_polygon(78, 114, 130, 114, 144, 126, 92, 126, fill="#f0b65f", outline="#8a5a22")
         self.box_side = c.create_polygon(130, 114, 144, 126, 144, 154, 130, 154, fill="#ad7130", outline="#8a5a22")
@@ -75,15 +104,26 @@ class IndustrialSimulation:
         ready = bool(signals.get("READY", False))
         alarm = bool(signals.get("ALARM", False))
 
+        if diverter and 326 <= self.box_x <= 386:
+            self.divert_armed = True
+
         gate_stop_x = 372
-        gate_is_blocking = not gate and self.box_x >= gate_stop_x
-        if motor and not gate_is_blocking:
-            self.box_x += 96 * dt
+        divert_start_x = 410
+        if self.box_y_offset > 0.0:
+            self.box_x += 40 * dt
+            self.box_y_offset += 80 * dt
+            if self.box_y_offset > 110 or self.box_x > 540:
+                self._spawn_next_box()
+        elif motor:
+            new_x = self.box_x + 96 * dt
+            if not gate and self.box_x < gate_stop_x:
+                new_x = min(new_x, gate_stop_x)
+            self.box_x = new_x
+            if self.divert_armed and self.box_x >= divert_start_x:
+                self.box_y_offset += 60 * dt
             if self.box_x > 500:
-                self.box_x = 58
+                self._spawn_next_box()
             self._animate_belt()
-        elif gate_is_blocking:
-            self.box_x = gate_stop_x
 
         self._set_box_coords()
         self.canvas.itemconfigure(self.motor_text, text="MOTOR ON" if motor else "MOTOR OFF", fill="#15803d" if motor else "#6b7280")
@@ -125,20 +165,37 @@ class IndustrialSimulation:
             self.canvas.itemconfigure(self.alarm_glow, fill="")
 
     def auto_sensor_states(self) -> Dict[str, bool]:
-        """Photo-eye sensors derived from the animated box position."""
+        """Photo-eye sensors and box classifier derived from the animated box."""
+        on_belt = self.box_y_offset < 4.0
         box_center = self.box_x + 26
         return {
-            "SENSOR1": 152 <= box_center <= 212,
-            "SENSOR2": 352 <= box_center <= 412,
+            "SENSOR1": on_belt and 152 <= box_center <= 212,
+            "SENSOR2": on_belt and 352 <= box_center <= 412,
+            "BOX_TYPE": self.box_type,
         }
+
+    def _spawn_next_box(self) -> None:
+        self.box_x = 58.0
+        self.box_y_offset = 0.0
+        self.divert_armed = False
+        self.box_type = not self.box_type
+        self._apply_box_color()
+
+    def _apply_box_color(self) -> None:
+        colors = self.REJECT_COLORS if self.box_type else self.ACCEPT_COLORS
+        self.canvas.itemconfigure(self.box_top, fill=colors["top"], outline=colors["outline"])
+        self.canvas.itemconfigure(self.box_side, fill=colors["side"], outline=colors["outline"])
+        self.canvas.itemconfigure(self.box_front, fill=colors["front"], outline=colors["outline"])
+        self.canvas.itemconfigure(self.box_seam, fill=colors["seam"])
 
     def _set_box_coords(self) -> None:
         x = self.box_x
-        self.canvas.coords(self.box_shadow, x - 2, 146, x + 66, 166)
-        self.canvas.coords(self.box_top, *self._flat((x, 114), (x + 52, 114), (x + 66, 126), (x + 14, 126)))
-        self.canvas.coords(self.box_side, *self._flat((x + 52, 114), (x + 66, 126), (x + 66, 154), (x + 52, 154)))
-        self.canvas.coords(self.box_front, x, 126, x + 52, 154)
-        self.canvas.coords(self.box_seam, x, 136, x + 52, 136)
+        y = self.box_y_offset
+        self.canvas.coords(self.box_shadow, x - 2, 146 + y, x + 66, 166 + y)
+        self.canvas.coords(self.box_top, *self._flat((x, 114 + y), (x + 52, 114 + y), (x + 66, 126 + y), (x + 14, 126 + y)))
+        self.canvas.coords(self.box_side, *self._flat((x + 52, 114 + y), (x + 66, 126 + y), (x + 66, 154 + y), (x + 52, 154 + y)))
+        self.canvas.coords(self.box_front, x, 126 + y, x + 52, 154 + y)
+        self.canvas.coords(self.box_seam, x, 136 + y, x + 52, 136 + y)
 
     def _animate_belt(self) -> None:
         for line in self.belt_motion:

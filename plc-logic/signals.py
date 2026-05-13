@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable
 
 
-DEFAULT_INPUTS = ("START", "STOP", "ESTOP", "SENSOR1", "SENSOR2")
+DEFAULT_INPUTS = ("START", "STOP", "ESTOP", "SENSOR1", "SENSOR2", "BOX_TYPE")
 INPUT_SET = set(DEFAULT_INPUTS)
 DEFAULT_OUTPUTS = (
     "MOTOR",

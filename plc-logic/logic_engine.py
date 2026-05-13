@@ -179,7 +179,7 @@ class LogicEngine:
             if not re.match(r"^[A-Z_][A-Z0-9_]*$", target):
                 raise LogicSyntaxError(f"Invalid target name '{left.strip()}'", line_no)
 
-            timer_match = re.match(r"^TIMER\s*\((.*),\s*([0-9]+(?:\.[0-9]+)?)\s*\)$", right.strip(), re.I)
+            timer_match = re.match(r"^TIMER\s*\((.*),\s*(-?[0-9]+(?:\.[0-9]+)?)\s*\)$", right.strip(), re.I)
             if timer_match:
                 input_expr = Parser(timer_match.group(1), line_no).parse()
                 delay = float(timer_match.group(2))
